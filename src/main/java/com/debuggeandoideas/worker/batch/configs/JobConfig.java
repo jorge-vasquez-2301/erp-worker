@@ -1,0 +1,68 @@
+package com.debuggeandoideas.worker.batch.configs;
+
+import com.debuggeandoideas.worker.batch.dtos.CatalogCacheDto;
+import com.debuggeandoideas.worker.batch.dtos.ProductCacheDto;
+import com.debuggeandoideas.worker.batch.readers.CatalogMongoReader;
+import com.debuggeandoideas.worker.batch.readers.ProductMongoReader;
+import com.debuggeandoideas.worker.commons.mongo.documents.CatalogDocument;
+import com.debuggeandoideas.worker.commons.mongo.documents.ProductInCatalogDocument;
+import com.debuggeandoideas.worker.batch.processors.CatalogCacheProcessor;
+import com.debuggeandoideas.worker.batch.processors.ProductCacheProcessor;
+import com.debuggeandoideas.worker.batch.writers.CatalogRedisWriter;
+import com.debuggeandoideas.worker.batch.writers.ProductRedisWriter;
+import lombok.RequiredArgsConstructor;
+import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.Step;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.infrastructure.support.transaction.ResourcelessTransactionManager;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+@RequiredArgsConstructor
+public class JobConfig {
+
+    private final ProductMongoReader productMongoReader;
+    private final CatalogMongoReader catalogMongoReader;
+
+    private final ProductCacheProcessor productCacheProcessor;
+    private final CatalogCacheProcessor catalogCacheProcessor;
+
+    private final ProductRedisWriter productRedisWriter;
+    private final CatalogRedisWriter catalogRedisWriter;
+
+    @Bean
+    public Job cacheWarmupJob(JobRepository jobRepository) {
+
+        return new JobBuilder("cacheWarmupJob", jobRepository)
+                .start(warmupProductStep(jobRepository))
+                .next(warmupCatalogStep(jobRepository))
+                 .build();
+    }
+
+    @Bean
+    public Step warmupProductStep(JobRepository jobRepository) {
+
+        return new StepBuilder("warmupProductStep", jobRepository)
+                .<ProductInCatalogDocument, ProductCacheDto>chunk(10)
+                .transactionManager(new ResourcelessTransactionManager())
+                .reader(this.productMongoReader.productReader())
+                .processor(this.productCacheProcessor)
+                .writer(this.productRedisWriter)
+                .build();
+    }
+
+    @Bean
+    public Step warmupCatalogStep(JobRepository jobRepository) {
+
+        return new StepBuilder("warmupCatalogStep", jobRepository)
+                .<CatalogDocument, CatalogCacheDto>chunk(10)
+                .transactionManager(new ResourcelessTransactionManager())
+                .reader(this.catalogMongoReader.catalogReader())
+                .processor(this.catalogCacheProcessor)
+                .writer(this.catalogRedisWriter)
+                .build();
+    }
+}
